@@ -19,12 +19,19 @@
     "permissions": ["storage", "activeTab", "scripting"],
     "host_permissions": ["https://*.lichess.org/*", "https://api.studio.nebius.ai/*"],
     "background": {
-        "service_worker": "background.js"
+        "service_worker": "background.js",
+        "type": "module"
     },
     "content_scripts": [
         {
             "matches": ["https://*.lichess.org/*"],
             "js": ["contentScript.js"]
         }
+    ],
+    "web_accessible_resources": [
+      {
+        "resources": ["sidebar.js", "chunks/*"],
+        "matches": ["https://lichess.org/*"]
+      }
     ]
 }
