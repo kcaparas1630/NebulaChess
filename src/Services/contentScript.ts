@@ -335,7 +335,15 @@ const analyzeCurrentPosition = async (fen: string) => {
 };
 
 const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
-  // TODO: Update the sidebar
+  // Send the analysis to React application in the sidebar
+  console.log("Updating sidebar with analysis", analysis);
+  window.postMessage(
+    {
+      type: "CHESS_ANALYSIS_RESULT",
+      analysis: analysis,
+    },
+    "*"
+  );
 };
 
 // Start initialization when document is ready
