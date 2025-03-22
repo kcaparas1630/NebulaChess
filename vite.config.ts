@@ -37,7 +37,7 @@ export default defineConfig({
         background: resolve(__dirname, "src/services/background.ts"),
         contentScript: resolve(__dirname, "src/services/contentScript.ts"),
         sidebar: resolve(__dirname, "src/main.tsx"),
-        popup: resolve(__dirname, "src/popup.ts")
+        popup: resolve(__dirname, "src/services/popup.ts")
       },
       output: {
         format: "es",
