@@ -6,156 +6,187 @@ let isActive: boolean = false;
 
 // Listen for Chrome Extension installation or update
 chrome.runtime.onInstalled.addListener(() => {
-    console.log("Chess Assistant for Lichess is installed");
+  console.log("Chess Assistant for Lichess is installed");
 
-    // Initialize default settings
-    chrome.storage.sync.set({
-        analysisDepth: 5,
-        preferedStrategy: "balanced",
-        autoAnalyze: true,
-    });
+  // Initialize default settings
+  chrome.storage.sync.set({
+    analysisDepth: 5,
+    preferedStrategy: "balanced",
+    autoAnalyze: true,
+  });
 });
 
 // Listen for messages from the content script or popup
-chrome.runtime.onMessage.addListener((request, _sender, sendResponse: (response: MessageResponse) => void) => {
+chrome.runtime.onMessage.addListener(
+  (request, _sender, sendResponse: (response: MessageResponse) => void) => {
     if (request.type === "TOGGLE_ASSISTANT") {
-        isActive = !isActive;
-        
-        // Store state in chrome.storage
-        chrome.storage.sync.set({isActive: isActive}, () => {
-            // Broadcast state change to all tabs
-            chrome.tabs.query({url: "https://lichess.org/*"}, (tabs) => {
-                if (tabs.length === 0) {
-                    console.log("No Lichess tabs found");
-                    sendResponse({success: true, isActive: isActive});
-                    return;
-                }
-                
-                let tabsProcessed = 0;
-                
-                tabs.forEach((tab) => {
-                    if (tab.id) {
-                        // Check if tab is ready before sending message
-                        isTabReady(tab.id, (ready) => {
-                            tabsProcessed++;
-                            
-                            if (ready) {
-                                chrome.tabs.sendMessage(tab.id!, {type: "STATE_CHANGED", isActive: isActive}, (response) => {
-                                    if (chrome.runtime.lastError) {
-                                        console.log("Error sending message to tab:", chrome.runtime.lastError);
-                                        console.log("Response:", response);
-                                    }
-                                });
-                            } else {
-                                console.log("Tab not ready:", tab.id);
-                            }
-                            
-                            // If all tabs have been processed, send the response
-                            if (tabsProcessed === tabs.length) {
-                                sendResponse({success: true, isActive: isActive});
-                            }
-                        });
-                    } else {
-                        tabsProcessed++;
+      isActive = !isActive;
+
+      // Store state in chrome.storage
+      chrome.storage.sync.set({ isActive: isActive }, () => {
+        // Broadcast state change to all tabs
+        chrome.tabs.query({ url: "https://lichess.org/*" }, (tabs) => {
+          if (tabs.length === 0) {
+            console.log("No Lichess tabs found");
+            sendResponse({ success: true, isActive: isActive });
+            return;
+          }
+
+          let tabsProcessed = 0;
+
+          tabs.forEach((tab) => {
+            if (tab.id) {
+              // Check if tab is ready before sending message
+              isTabReady(tab.id, (ready) => {
+                tabsProcessed++;
+
+                if (ready) {
+                  chrome.tabs.sendMessage(
+                    tab.id!,
+                    { type: "STATE_CHANGED", isActive: isActive },
+                    (response) => {
+                      if (chrome.runtime.lastError) {
+                        console.log(
+                          "Error sending message to tab:",
+                          chrome.runtime.lastError
+                        );
+                        console.log("Response:", response);
+                      }
                     }
-                });
-            });
-            
-            // In case the tabs query doesn't return in time, still send a response
-            // This is a fallback and may cause duplicate responses, which the caller should handle
-            setTimeout(() => {
-                sendResponse({success: true, isActive: isActive});
-            }, 500);
+                  );
+                } else {
+                  console.log("Tab not ready:", tab.id);
+                }
+
+                // If all tabs have been processed, send the response
+                if (tabsProcessed === tabs.length) {
+                  sendResponse({ success: true, isActive: isActive });
+                }
+              });
+            } else {
+              tabsProcessed++;
+            }
+          });
         });
-        return true;
+
+        // In case the tabs query doesn't return in time, still send a response
+        // This is a fallback and may cause duplicate responses, which the caller should handle
+        setTimeout(() => {
+          sendResponse({ success: true, isActive: isActive });
+        }, 500);
+      });
+      return true;
     }
 
     if (request.type === "REQUEST_ANALYSIS") {
-        console.log("Requesting analysis", request.fen);
-        // Forward the request to Nebius AI API
-        analyzePosition(request.fen)
+      console.log("Requesting analysis", request.fen);
+      // Forward the request to Nebius AI API
+      analyzePosition(request.fen)
         .then((analysis: ChessAnalysis) => {
-            sendResponse({success: true, analysis: analysis});
+          sendResponse({ success: true, analysis: analysis });
         })
         .catch((error: Error) => {
-            console.error("Error analyzing position:", error);
-            sendResponse({success: false, error: error.message});
+          console.error("Error analyzing position:", error);
+          sendResponse({ success: false, error: error.message });
         });
-        return true;
+      return true;
     }
-});
-
+  }
+);
 
 const isTabReady = (tabId: number, callback: (ready: boolean) => void) => {
-    chrome.tabs.sendMessage(tabId, {type: "PING"}, (response) => {
-        if (chrome.runtime.lastError) {
-            console.log("Tab not ready:", chrome.runtime.lastError);
-            callback(false);
-            return;
-        }
-        callback(response && response.pong);
-    });
+  chrome.tabs.sendMessage(tabId, { type: "PING" }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.log("Tab not ready:", chrome.runtime.lastError);
+      callback(false);
+      return;
+    }
+    callback(response && response.pong);
+  });
+};
+
+const CHESS_ANALYSIS_PROMPT = `You are an elite chess grandmaster focused on finding the optimal moves against Magnus Carlsen. Your task is to analyze chess positions with grandmaster-level precision and provide:
+1. The single best move in standard chess notation (e.g., "e5-e6" or "Nf3")
+2. Concise reasoning explaining why this move is optimal
+
+Your analysis must be formatted to match this interface:
+{
+  "evaluation": number,  // Position evaluation in centipawns (positive favors you, negative favors opponent)
+  "bestMove": string,   // The single best move in the position (e.g., "e5-e6" or "Nf3")
+  "depth": number,      // Depth of calculation (5 minimum)
+  "moveReasoning": string // Brief explanation of why this is the best move
 }
+
+When analyzing positions:
+- Calculate at least 5 moves deep
+- Identify tactical opportunities and positional advantages
+- Consider Magnus Carlsen's known tendencies in similar positions
+- Focus on practical winning chances rather than theoretical evaluations
+
+When the game is starting (initial position), provide the user with strong opening options such as:
+- Queen's Gambit
+- Ruy Lopez
+- English Opening
+- Sicilian Defense
+- King's Indian Defense
+- French Defense
+- Caro-Kann
+
+Include the first move of each opening and a brief strength/characteristic of that opening against Magnus Carlsen's style.
+
+You will receive positions in FEN notation. Respond ONLY with the structured analysis that matches the interface - no introduction or additional commentary.`;
 
 const analyzePosition = async (fen: string): Promise<ChessAnalysis> => {
-    try {
-        const response = await axios.post('https://api.studio.nebius.ai/v1/chat/completions', {
-            model: "meta-llama/Meta-Llama-3.1-70B-Instruct-fast",
-            max_tokens: 1500,
-            temperature: 0.6,
-            top_p: 0.9,
-            top_k: 50,
-            messages: [
-                {
-                    role: "system",
-                    content: `You are a smart, cunning chess grandmaster who is focused on achieving victory against Magnus Carlsen. You are tasked to analyze the chess game state with depth and precision, considering both immediate tactics and long-term strategy. Provide insightful next moves that exploit positional weaknesses, create dynamic imbalances, and maintain initiative. Include reasoning behind each suggestion, potential variations, and psychological factors that might affect your opponent. Your analysis should reflect grandmaster-level pattern recognition, calculation abilities, and strategic understanding so that the player you're assisting can win the game against the world champion.
-                            When analyzing a move that the opponent made:
+  try {
+    const response = await axios.post(
+      "https://api.studio.nebius.ai/v1/chat/completions",
+      {
+        model: "meta-llama/Meta-Llama-3.1-70B-Instruct-fast",
+        max_tokens: 1500,
+        temperature: 0.6,
+        top_p: 0.9,
+        top_k: 50,
+        messages: [
+          {
+            role: "system",
+            content: CHESS_ANALYSIS_PROMPT
+          },
+          {
+            role: "user",
+            content: `Analyze this chess position: ${fen}`,
+          },
+        ],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_NEBIUS_API_KEY}`,
+        },
+      }
+    );
 
-                           * Calculate at least 5 moves ahead to identify winning sequences
-                           * Evaluate if the opponent's move creates tactical or positional weaknesses you can exploit
-                           * Assess any hidden threats or strategic plans behind seemingly innocent moves
-                           * Consider psychological patterns in Magnus's play style relevant to the position
+    const responseData = JSON.parse(response.data.choices[0].message.content);
+    console.log("Analysis response", responseData);
+    const analysis: ChessAnalysis = {
+      evaluation: responseData.evaluation,
+      bestMove: responseData.bestMove,
+      moveReasoning: responseData.moveReasoning,
+      depth: responseData.depth,
+    };
+    return analysis;
+  } catch (error: unknown) {
+    console.error("Error analyzing position:", error);
+    const axiosError = error as AxiosError;
 
-                            When analyzing a move that the player made without asking your suggestion:
-
-                            * Provide constructive feedback highlighting potential improvements or alternative approaches
-                            * Evaluate the strengths and weaknesses of the chosen move
-                            * Compliment thoughtful or particularly strong moves with specific praise explaining why the move was excellent
-                            * Suggest follow-up plans that build upon their move to maintain or increase advantage`
-                },
-                {
-                    role: "user",
-                    content: `Analyze this chess position: ${fen}`
-                }
-            ]
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${import.meta.env.VITE_NEBIUS_API_KEY}`
-            }
-        });
-
-        const data = response.data;
-        console.log("Analysis response", data);
-        const analysis: ChessAnalysis = {
-            evaluation: data.choices[0].message.content,
-            bestMove: data.choices[0].message.content,
-            depth: 5
-        }
-        return analysis;
-    } catch (error: unknown) {
-        console.error("Error analyzing position:", error);
-        const axiosError = error as AxiosError;
-        
-        if (axiosError.response) {
-            console.error("Error response data:", axiosError.response.data);
-            console.error("Error response status:", axiosError.response.status);
-        } else if (axiosError.request) {
-            console.error("No response received:", axiosError.request);
-        } else {
-            console.error("Error setting up request:", axiosError.message);
-        }
-        
-        throw new Error(`Failed to analyze position: ${axiosError.message}`);
+    if (axiosError.response) {
+      console.error("Error response data:", axiosError.response.data);
+      console.error("Error response status:", axiosError.response.status);
+    } else if (axiosError.request) {
+      console.error("No response received:", axiosError.request);
+    } else {
+      console.error("Error setting up request:", axiosError.message);
     }
-}
+
+    throw new Error(`Failed to analyze position: ${axiosError.message}`);
+  }
+};

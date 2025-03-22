@@ -89,7 +89,7 @@ const injectSidebar = () => {
   const styleElement = document.createElement("style");
   styleElement.textContent = `
     #react-root {
-      width: 300px;
+      width: 20vw;
       height: 100vh;
       background-color: #2b2b2b;
       color: #ffffff;
@@ -346,7 +346,8 @@ const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
   window.postMessage(
     {
       type: "CHESS_ANALYSIS_RESULT",
-      analysis: analysis,
+      bestMove: analysis.bestMove,
+      moveReasoning: analysis.moveReasoning,
     },
     "*"
   );
