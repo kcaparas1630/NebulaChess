@@ -1,5 +1,6 @@
 import MessageResponse from "../Types/MessageResponse";
 import ChessAnalysis from "../Types/ChessAnalysis";
+import axios, { AxiosError } from "axios";
 
 let isActive: boolean = false;
 
@@ -96,6 +97,65 @@ const isTabReady = (tabId: number, callback: (ready: boolean) => void) => {
     });
 }
 
-const analyzePosition = async (fen: string) => {
-    // TODO: Analyze the position
+const analyzePosition = async (fen: string): Promise<ChessAnalysis> => {
+    try {
+        const response = await axios.post('https://api.studio.nebius.ai/v1/chat/completions', {
+            model: "meta-llama/Meta-Llama-3.1-70B-Instruct-fast",
+            max_tokens: 1500,
+            temperature: 0.6,
+            top_p: 0.9,
+            top_k: 50,
+            messages: [
+                {
+                    role: "system",
+                    content: `You are a smart, cunning chess grandmaster who is focused on achieving victory against Magnus Carlsen. You are tasked to analyze the chess game state with depth and precision, considering both immediate tactics and long-term strategy. Provide insightful next moves that exploit positional weaknesses, create dynamic imbalances, and maintain initiative. Include reasoning behind each suggestion, potential variations, and psychological factors that might affect your opponent. Your analysis should reflect grandmaster-level pattern recognition, calculation abilities, and strategic understanding so that the player you're assisting can win the game against the world champion.
+                            When analyzing a move that the opponent made:
+
+                           * Calculate at least 5 moves ahead to identify winning sequences
+                           * Evaluate if the opponent's move creates tactical or positional weaknesses you can exploit
+                           * Assess any hidden threats or strategic plans behind seemingly innocent moves
+                           * Consider psychological patterns in Magnus's play style relevant to the position
+
+                            When analyzing a move that the player made without asking your suggestion:
+
+                            * Provide constructive feedback highlighting potential improvements or alternative approaches
+                            * Evaluate the strengths and weaknesses of the chosen move
+                            * Compliment thoughtful or particularly strong moves with specific praise explaining why the move was excellent
+                            * Suggest follow-up plans that build upon their move to maintain or increase advantage`
+                },
+                {
+                    role: "user",
+                    content: `Analyze this chess position: ${fen}`
+                }
+            ]
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${import.meta.env.VITE_NEBIUS_API_KEY}`
+            }
+        });
+
+        const data = response.data;
+        console.log("Analysis response", data);
+        const analysis: ChessAnalysis = {
+            evaluation: data.choices[0].message.content,
+            bestMove: data.choices[0].message.content,
+            depth: 5
+        }
+        return analysis;
+    } catch (error: unknown) {
+        console.error("Error analyzing position:", error);
+        const axiosError = error as AxiosError;
+        
+        if (axiosError.response) {
+            console.error("Error response data:", axiosError.response.data);
+            console.error("Error response status:", axiosError.response.status);
+        } else if (axiosError.request) {
+            console.error("No response received:", axiosError.request);
+        } else {
+            console.error("Error setting up request:", axiosError.message);
+        }
+        
+        throw new Error(`Failed to analyze position: ${axiosError.message}`);
+    }
 }
