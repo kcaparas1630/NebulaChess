@@ -154,7 +154,76 @@ const removeSidebar = () => {
 };
 
 const startBoardObserver = () => {
-  // TODO: Start the board observer
+  // if already observing
+  if (boardObserver) return;
+
+  extractFen();
+
+  // Set up board observer for DOM changes
+  boardObserver = new MutationObserver((mutations) => {
+    // Only proceed if the changes are related to piece movements
+    const hasPieceChanges = mutations.some((mutation) => {
+      // Check if the mutation directly involves a piece element
+      if (
+        mutation.target instanceof HTMLElement &&
+        mutation.target.tagName.toLowerCase() === "piece"
+      ) {
+        return true;
+      }
+
+      // Check if the mutation involves piece attributes (esp. style/transform)
+      if (
+        mutation.type === "attributes" &&
+        mutation.target instanceof HTMLElement &&
+        mutation.target.classList.contains("piece")
+      ) {
+        return true;
+      }
+
+      // Check if the mutation contains added/removed piece nodes
+      if (mutation.type === "childList") {
+        // Check added nodes
+        for (const node of mutation.addedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            (node.tagName.toLowerCase() === "piece" ||
+              node.querySelector("piece"))
+          ) {
+            return true;
+          }
+        }
+
+        // Check removed nodes
+        for (const node of mutation.removedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            (node.tagName.toLowerCase() === "piece" ||
+              node.querySelector("piece"))
+          ) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    });
+    if (hasPieceChanges) {
+      setTimeout(() => {
+        const newFen = extractFen();
+        if (newFen !== currentFen && newFen !== null) {
+          currentFen = newFen;
+          analyzeCurrentPosition(newFen);
+        }
+      }, 500);
+    }
+  });
+
+  // Start observing the board
+  boardObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+  });
 };
 
 const stopBoardObserver = () => {
