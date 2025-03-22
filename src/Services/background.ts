@@ -86,7 +86,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse: (response:
 
 
 const isTabReady = (tabId: number, callback: (ready: boolean) => void) => {
-    // TODO: Check if the tab is ready
+    chrome.tabs.sendMessage(tabId, {type: "PING"}, (response) => {
+        if (chrome.runtime.lastError) {
+            console.log("Tab not ready:", chrome.runtime.lastError);
+            callback(false);
+            return;
+        }
+        callback(response && response.pong);
+    });
 }
 
 const analyzePosition = async (fen: string) => {
