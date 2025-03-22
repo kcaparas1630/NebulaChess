@@ -309,8 +309,29 @@ const extractFen = () => {
     return fen;
 };
 
-const analyzeCurrentPosition = async () => {
-  // TODO: Analyze the position
+const analyzeCurrentPosition = async (fen: string) => {
+  // Add error handling when sending messages
+  chrome.runtime.sendMessage(
+    {
+      type: "REQUEST_ANALYSIS",
+      fen: fen,
+    },
+    (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("Message error:", chrome.runtime.lastError);
+        return;
+      }
+      console.log("Response success", response && response.success);
+      if (response && response.success) {
+        updateSidebarWithAnalysis(response.analysis);
+      } else {
+        console.error(
+          "Analysis request failed",
+          response?.error || "Unknown error"
+        );
+      }
+    }
+  );
 };
 
 const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
