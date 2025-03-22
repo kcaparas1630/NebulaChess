@@ -231,10 +231,85 @@ const stopBoardObserver = () => {
 };
 
 const extractFen = () => {
-  // TODO: Extract the FEN from the board
+    const board: HTMLElement | null = document.querySelector("cg-board");
+    if (!board) return null;
+  
+    // Initialize empty 8x8 board
+    const boardArray: string[][] = Array(8)
+      .fill("")
+      .map(() => Array(8).fill(""));
+  
+    // Get all pieces
+    const pieces = board.querySelectorAll("piece");
+  
+    // Process each piece
+    pieces.forEach((piece) => {
+      const transform = (piece as HTMLElement).style.transform;
+      const matches = transform.match(/translate\((\d+)px(?:,\s*(\d+)px)?\)/);
+  
+      if (matches) {
+        // Extract x, y coordinates
+        const x = parseInt(matches[1]) / 92; // 736px / 8 = 92px per square
+        const y = parseInt(String(matches[2] || 0)) / 92;
+  
+        // Get piece type and color
+        const classes = piece.classList;
+        let pieceChar = "";
+  
+        if (classes.contains("pawn")) pieceChar = "p";
+        else if (classes.contains("knight")) pieceChar = "n";
+        else if (classes.contains("bishop")) pieceChar = "b";
+        else if (classes.contains("rook")) pieceChar = "r";
+        else if (classes.contains("queen")) pieceChar = "q";
+        else if (classes.contains("king")) pieceChar = "k";
+  
+        // Uppercase for white pieces
+        if (classes.contains("white")) pieceChar = pieceChar.toUpperCase();
+  
+        // Place on board (y axis is flipped in chess notation)
+        if (x >= 0 && x < 8 && y >= 0 && y < 8) {
+          boardArray[Math.floor(y)][Math.floor(x)] = pieceChar;
+        }
+      }
+    });
+  
+    // Convert board array to FEN
+    let fen = "";
+    for (let i = 0; i < 8; i++) {
+      let emptyCount = 0;
+      for (let j = 0; j < 8; j++) {
+        if (boardArray[i][j] === "") {
+          emptyCount++;
+        } else {
+          if (emptyCount > 0) {
+            fen += emptyCount;
+            emptyCount = 0;
+          }
+          fen += boardArray[i][j];
+        }
+      }
+      if (emptyCount > 0) {
+        fen += emptyCount;
+      }
+      if (i < 7) fen += "/";
+    }
+  
+    // Try to get turn information from the DOM
+    let turn = "w"; // Default to white
+    const turnIndicator = document.querySelector(".turn");
+    if (turnIndicator) {
+      turn = turnIndicator.classList.contains("black") ? "b" : "w";
+    }
+  
+    // Complete FEN with turn and default values for other components
+    fen += ` ${turn} KQkq - 0 1`;
+  
+    console.log("FEN:", fen);
+  
+    return fen;
 };
 
-const analyzePosition = async () => {
+const analyzeCurrentPosition = async () => {
   // TODO: Analyze the position
 };
 
