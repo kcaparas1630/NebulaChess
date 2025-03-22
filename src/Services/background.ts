@@ -81,7 +81,7 @@ chrome.runtime.onMessage.addListener(
     if (request.type === "REQUEST_ANALYSIS") {
       console.log("Requesting analysis", request.fen);
       // Forward the request to Nebius AI API
-      analyzePosition(request.fen)
+      analyzePosition(request.fen, request.playerColor, request.moveHistory)
         .then((analysis: ChessAnalysis) => {
           sendResponse({ success: true, analysis: analysis });
         })
@@ -105,7 +105,7 @@ const isTabReady = (tabId: number, callback: (ready: boolean) => void) => {
   });
 };
 
-const CHESS_ANALYSIS_PROMPT = `You are an elite chess grandmaster focused on finding the optimal moves against Magnus Carlsen. Your task is to analyze chess positions with grandmaster-level precision and provide:
+const CHESS_ANALYSIS_PROMPT = `You are an elite chess grandmaster focused on finding the optimal moves against famous chess players. Your task is to analyze chess positions with grandmaster-level precision and provide:
 1. The single best move in standard chess notation (e.g., "e5-e6" or "Nf3")
 2. Concise reasoning explaining why this move is optimal
 
@@ -123,6 +123,12 @@ When analyzing positions:
 - Consider Magnus Carlsen's known tendencies in similar positions
 - Focus on practical winning chances rather than theoretical evaluations
 
+When provided with game history:
+- Identify the opponent's last move from the position changes
+- Consider how the opponent is playing (aggressive, defensive, positional)
+- Adapt your recommendations to counter the opponent's strategy
+- Reference specific moves in the history when relevant to your analysis
+
 When the game is starting (initial position), provide the user with strong opening options such as:
 - Queen's Gambit
 - Ruy Lopez
@@ -132,28 +138,71 @@ When the game is starting (initial position), provide the user with strong openi
 - French Defense
 - Caro-Kann
 
-Include the first move of each opening and a brief strength/characteristic of that opening against Magnus Carlsen's style.
+Include the first move of each opening and a brief strength/characteristic of that opening against a famous grandmaster style.
 
-You will receive positions in FEN notation. Respond ONLY with the structured analysis that matches the interface - no introduction or additional commentary.`;
+You will receive positions in FEN notation, possibly with previous positions for context. Respond ONLY with the structured analysis that matches the interface - no introduction or additional commentary.
+Your response must be ONLY a valid JSON object with the exact structure shown, with no additional text, markdown formatting, or explanation before or after. The entire response must be parsable as JSON.`;
 
-const analyzePosition = async (fen: string): Promise<ChessAnalysis> => {
+const analyzePosition = async (
+  fen: string,
+  playerColor: "white" | "black",
+  moveHistory: string[] = []
+): Promise<ChessAnalysis> => {
+  // Create a more structured context from the game history
+  let historyContext = "";
+
+  if (moveHistory.length > 1) {
+    // Extract the last few positions for context (not too many to avoid token limits)
+    const relevantHistory = moveHistory.slice(-Math.min(5, moveHistory.length));
+
+    // Create a more meaningful representation of position changes
+    historyContext = "Game history:\n";
+
+    for (let i = 0; i < relevantHistory.length; i++) {
+      // Add move number and FEN
+      historyContext += `Move ${
+        moveHistory.length - relevantHistory.length + i + 1
+      }: ${relevantHistory[i]}\n`;
+
+      // If not the last move, try to describe what changed between positions
+      if (i < relevantHistory.length - 1) {
+        historyContext += "→ ";
+      }
+    }
+  }
+
+  // Build user message with current game state
+  const userMessage = `
+  Analyze this specific chess position: ${fen}
+  I am playing as ${playerColor}.
+  Current player to move: ${fen.split(" ")[1] === "w" ? "White" : "Black"}
+  
+  ${historyContext}
+  
+  Return ONLY a JSON object with evaluation, bestMove, depth, and moveReasoning fields.
+  `;
+
   try {
+    console.log("Sending analysis request with context:", userMessage);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20-second timeout
+
     const response = await axios.post(
       "https://api.studio.nebius.ai/v1/chat/completions",
       {
         model: "meta-llama/Meta-Llama-3.1-70B-Instruct-fast",
-        max_tokens: 1500,
+        max_tokens: 500,
         temperature: 0.6,
         top_p: 0.9,
         top_k: 50,
         messages: [
           {
             role: "system",
-            content: CHESS_ANALYSIS_PROMPT
+            content: CHESS_ANALYSIS_PROMPT,
           },
           {
             role: "user",
-            content: `Analyze this chess position: ${fen}`,
+            content: userMessage,
           },
         ],
       },
@@ -162,17 +211,47 @@ const analyzePosition = async (fen: string): Promise<ChessAnalysis> => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_NEBIUS_API_KEY}`,
         },
+        signal: controller.signal,
       }
     );
 
-    const responseData = JSON.parse(response.data.choices[0].message.content);
+    clearTimeout(timeoutId);
+
+    // Safely parse JSON with error handling
+    let responseData;
+    try {
+      const content = response.data.choices[0].message.content.trim();
+      // Attempt to fix common JSON issues like trailing commas
+      const sanitizedContent = content
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
+
+      responseData = JSON.parse(sanitizedContent);
+    } catch (parseError) {
+      console.error("JSON parsing error:", parseError);
+      console.log("Raw response:", response.data.choices[0].message.content);
+
+      // Fallback response if parsing fails
+      return {
+        evaluation: 0,
+        bestMove: "Unable to parse response",
+        moveReasoning:
+          "The analysis engine returned an invalid response. Please try again.",
+        depth: 0,
+      };
+    }
+
     console.log("Analysis response", responseData);
+
+    // Validate the response has all required fields
     const analysis: ChessAnalysis = {
-      evaluation: responseData.evaluation,
-      bestMove: responseData.bestMove,
-      moveReasoning: responseData.moveReasoning,
-      depth: responseData.depth,
+      evaluation: responseData.evaluation || 0,
+      bestMove: responseData.bestMove || "Unknown",
+      moveReasoning: responseData.moveReasoning || "No reasoning provided",
+      depth: responseData.depth || 0,
     };
+
     return analysis;
   } catch (error: unknown) {
     console.error("Error analyzing position:", error);
