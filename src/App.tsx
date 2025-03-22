@@ -1,11 +1,5 @@
+import Sidebar from "./Components/Sidebar";
 
-const App = () => {
-
-  return (
-    <>
-      <h1>Hello World</h1>
-    </>
-  )
-}
+const App = () =>  <Sidebar />
 
 export default App
