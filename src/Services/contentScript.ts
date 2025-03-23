@@ -9,12 +9,13 @@ let sidebar: HTMLElement | null = null;
 let boardObserver: MutationObserver | null = null;
 let currentFen: string | null = null;
 let isActive: boolean = false;
-let playerColor: "white" | "black" | null = null;
-let isPlayerTurn: boolean = false;
 // eslint-disable-next-line prefer-const
 let moveHistory: string[] = [];
-let turnCount = 0;
-let lastTurnPlayerColor: "white" | "black" | null = null;
+let previousMoveElementsCount: number = 0;
+let turnCount: number = 0;
+// eslint-disable-next-line prefer-const
+let lastTurnPlayerColor: "white" | "black" = "white";
+let playerColor: "white" | "black" | null = null;
 
 // Initialize when content script loads
 const initialize = () => {
@@ -169,15 +170,12 @@ const removeSidebar = () => {
 };
 
 const startBoardObserver = () => {
-  // if already observing
-  if (boardObserver) return;
-
-  // detect player color
-  detectPlayerColor();
+  // Replace the single detection call with ensurePlayerColor
+  ensurePlayerColor();
 
   const fen = extractFen();
-  // analyze at the starting position.
-  if (fen) {
+  // Only analyze if we have both FEN and player color
+  if (fen && playerColor) {
     analyzeCurrentPosition(fen);
   }
 
@@ -185,152 +183,75 @@ const startBoardObserver = () => {
   let lastPieceChangeTime = 0;
   const MIN_MOVE_INTERVAL = 300; // Minimum time between move detections (ms)
   // Set up board observer for DOM changes
-  boardObserver = new MutationObserver((mutations) => {
-    // Check for orientation changes (might indicate player color changed)
-    const orientationChanged = mutations.some(
-      (mutation) =>
-        mutation.target instanceof HTMLElement &&
-        mutation.target.classList.contains("orientation-changed")
-    );
+  boardObserver = new MutationObserver(() => {
+    // Get all kwdb elements (move notation elements)
+    const moveElements = document.querySelectorAll("kwdb");
+    const currentMoveElementsCount = moveElements.length;
 
-    if (orientationChanged) {
-      detectPlayerColor();
+    // Check if board state has changed
+    let boardChanged = false;
+
+    if (currentMoveElementsCount === 0) {
+      // Initial state of the board - need to check for piece movements
+      // We'll use the FEN directly to check for changes
+      const newFen = extractFen();
+      if (newFen && newFen !== currentFen && currentFen !== null) {
+        boardChanged = true;
+        console.log("Board changed (initial position)");
+      }
+    } else if (currentMoveElementsCount !== previousMoveElementsCount) {
+      // If the number of move elements has changed, a move was definitely made
+      boardChanged = true;
+      console.log(
+        `Move elements changed: ${previousMoveElementsCount} -> ${currentMoveElementsCount}`
+      );
     }
 
-    // Check for last-move indicators (primary method)
-    const hasLastMoveIndicator = mutations.some((mutation) => {
-      if (mutation.type === "childList") {
-        // Look for added nodes that have the "last-move" class
-        return Array.from(mutation.addedNodes).some(
-          (node) =>
-            node instanceof HTMLElement &&
-            (node.classList?.contains("last-move") ||
-              node.querySelector?.(".last-move"))
-        );
-      }
+    // Update the counter for next time
+    previousMoveElementsCount = currentMoveElementsCount;
 
-      // Also check for attribute changes adding the "last-move" class
-      if (
-        mutation.type === "attributes" &&
-        mutation.attributeName === "class" &&
-        mutation.target instanceof HTMLElement
-      ) {
-        return mutation.target.classList.contains("last-move");
-      }
-
-      return false;
-    });
-
-    // Fallback: Check for piece movements (backup method)
-    const hasPieceChanges =
-      !hasLastMoveIndicator &&
-      mutations.some((mutation) => {
-        // Check if the mutation directly involves a piece element
-        if (
-          mutation.target instanceof HTMLElement &&
-          mutation.target.tagName.toLowerCase() === "piece"
-        ) {
-          return true;
-        }
-
-        // Check if the mutation involves piece attributes (esp. style/transform)
-        if (
-          mutation.type === "attributes" &&
-          mutation.target instanceof HTMLElement &&
-          mutation.target.classList.contains("piece")
-        ) {
-          return true;
-        }
-
-        // Check if the mutation contains added/removed piece nodes
-        if (mutation.type === "childList") {
-          // Check added nodes
-          for (const node of mutation.addedNodes) {
-            if (
-              node instanceof HTMLElement &&
-              (node.tagName.toLowerCase() === "piece" ||
-                node.querySelector("piece"))
-            ) {
-              return true;
-            }
-          }
-
-          // Check removed nodes
-          for (const node of mutation.removedNodes) {
-            if (
-              node instanceof HTMLElement &&
-              (node.tagName.toLowerCase() === "piece" ||
-                node.querySelector("piece"))
-            ) {
-              return true;
-            }
-          }
-        }
-
-        return false;
-      });
-
-    // Process a move if either detection method triggers
-    if (hasLastMoveIndicator || hasPieceChanges) {
-      // Track last piece change time to prevent double-counting
-      const now = Date.now();
-
-      // Prevent multiple triggers for the same move
-      if (now - lastPieceChangeTime < MIN_MOVE_INTERVAL) {
-        return;
-      }
-
-      lastPieceChangeTime = now;
-      // Use debug logging to help identify which detection method triggered
-      console.log(
-        `Move detected: lastMove=${hasLastMoveIndicator}, pieceChanges=${hasPieceChanges}`
-      );
-
-      // Add a slight delay to ensure the board has settled
-      setTimeout(() => {
-        const newFen = extractFen();
-        if (newFen !== currentFen && newFen !== null) {
-          currentFen = newFen;
-
-          // Update turn tracking based on piece movements
-          turnCount++;
-          lastTurnPlayerColor = turnCount % 2 === 1 ? "white" : "black";
-          isPlayerTurn =
-            playerColor === (turnCount % 2 === 0 ? "white" : "black");
-
-          updateMoveHistory(newFen);
-
-          console.log(
-            `Turn ${turnCount}: ${lastTurnPlayerColor}'s move just completed, isPlayerTurn: ${isPlayerTurn}`
-          );
-
-          // Only analyze positions when it's the player's turn to move
-          // This way we analyze after the computer has made its move
-          const isPlayerToMove =
-            (playerColor === "white" && newFen.includes(" w ")) ||
-            (playerColor === "black" && newFen.includes(" b "));
-
-          if (isPlayerToMove) {
-            console.log(
-              "It's your turn - analyzing position for your move options"
-            );
-            analyzeCurrentPosition(newFen);
-          } else if (turnCount <= 2) {
-            // Also analyze the first couple of moves regardless of turn
-            // This helps with opening suggestions
-            analyzeCurrentPosition(newFen);
-          }
-        }
-      }, 300);
+    // Process the move if board changed
+    if (boardChanged) {
+      processPotentialMove();
     }
   });
+  const processPotentialMove = () => {
+    const now = Date.now();
+    if (now - lastPieceChangeTime < MIN_MOVE_INTERVAL) return;
+    lastPieceChangeTime = now;
 
-  // Start observing the board with all necessary triggers
+    setTimeout(() => {
+      const newFen = extractFen();
+      if (!newFen || newFen === currentFen) return;
+
+      currentFen = newFen;
+      const isWhiteTurn = newFen.includes(" w ");
+      turnCount++;
+
+      // Add debug logging
+      console.log("Updating move history with FEN:", newFen);
+      updateMoveHistory(newFen);
+      console.log("Current move history length:", moveHistory.length);
+
+      const isPlayerToMove = playerColor === (isWhiteTurn ? "white" : "black");
+
+      console.log(
+        `Turn ${turnCount}: ${isWhiteTurn ? "White" : "Black"} to move. ${
+          isPlayerToMove ? "Your turn!" : "Opponent's turn."
+        }`
+      );
+
+      if (isPlayerToMove || turnCount <= 2) {
+        analyzeCurrentPosition(newFen);
+      }
+    }, 300);
+  };
+
+  // Start observing with optimized configuration
   boardObserver.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["class", "style"], // Focus on the attributes we care about
   });
 };
 
@@ -410,28 +331,19 @@ const extractFen = () => {
   }
 
   let turn = "w";
-  const messageDiv = document.querySelector(".message");
-  if (messageDiv) {
-    const messageText = messageDiv.textContent || "";
-    if (messageText.includes("your turn")) {
-      // It's the player's turn
-      isPlayerTurn = true;
-      turn = playerColor === "white" ? "w" : "b";
-    } else {
-      // It's the opponent's turn
-      isPlayerTurn = false;
-      turn = playerColor === "white" ? "b" : "w";
-    }
+  const moveElements = document.querySelectorAll("kwdb");
+  if (moveElements.length === 0) {
+    // Initial position, white to move
+    turn = "w";
+    lastTurnPlayerColor = "white";
   } else {
-    // No message div found, use board observer data to determine turn
-    if (lastTurnPlayerColor === playerColor) {
-      // if the last move was made by the player, it's now the opponent's turn
-      turn = playerColor === "white" ? "b" : "w";
-      isPlayerTurn = false;
-    } else {
-      // if the last move was made by the opponent, it's now the player's turn
-      turn = playerColor === "white" ? "w" : "b";
-      isPlayerTurn = true;
+    // After moves have been made
+    if (lastTurnPlayerColor === "white") {
+      turn = "b";
+      lastTurnPlayerColor = "black";
+    } else if (lastTurnPlayerColor === "black") {
+      turn = "w";
+      lastTurnPlayerColor = "white";
     }
   }
 
@@ -482,11 +394,31 @@ const extractFen = () => {
   fen += ` ${turn} ${castlingRights} ${enPassant} 0 ${estimatedMoveNumber}`;
 
   console.log("Extracted FEN:", fen);
-
   return fen;
 };
 
 const analyzeCurrentPosition = async (fen: string) => {
+  if (!playerColor) {
+    console.log("Waiting for player color detection...");
+    await new Promise((resolve) => {
+      const checkColor = () => {
+        if (playerColor) {
+          resolve(true);
+        } else {
+          setTimeout(checkColor, 100);
+        }
+      };
+      checkColor();
+    });
+  }
+
+  // Now we're sure we have playerColor
+  console.log(
+    `Analyzing position for ${playerColor} player, it's ${
+      fen.includes(" w ") ? "white" : "black"
+    }'s turn`
+  );
+
   // Extract just the board position part for tracking analyzed positions
   const fenBoardAndTurn = fen.split(" ").slice(0, 2).join(" ");
 
@@ -548,13 +480,25 @@ const analyzeCurrentPosition = async (fen: string) => {
       fen.includes(" w ") ? "white" : "black"
     }'s turn`
   );
+  const board: HTMLElement | null = document.querySelector("cg-board");
+  if (!board) return;
+  const pieces = board.querySelectorAll("piece");
+  let playerToMove: "white" | "black" | null = null;
+  if (pieces.length === 32) {
+    playerToMove = "white";
+  } else {
+    const turnFromFen = fen.split(" ")[1];
+    playerToMove = turnFromFen === "w" ? "white" : "black";
+  }
+
+  console.log("Player to move:", playerToMove);
 
   chrome.runtime.sendMessage(
     {
       type: "REQUEST_ANALYSIS",
       fen: fen,
-      playerColor: playerColor || "white",
-      moveHistory: moveHistory.slice(-6), // Only send the most recent positions
+      playerToMove: playerToMove,
+      moveHistory: moveHistory,
     },
     (response) => {
       // Mark that we're done with the analysis
@@ -609,46 +553,55 @@ const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
 };
 
 const detectPlayerColor = () => {
-  // Check for "your turn" message to determine player color
-  const messageDiv = document.querySelector(".message");
-  if (messageDiv) {
-    const messageText = messageDiv.textContent || "";
-    if (messageText.includes("your turn")) {
-      playerColor = "white";
-    } else {
-      playerColor = "black";
-    }
-    console.log(`Detected player color: ${playerColor} based on message text`);
+  const board = document.querySelector("cg-board");
+  if (board) {
+    // Find a white pawn (should be on the 7th rank if we're white, 2nd rank if we're black)
+    const whitePawns = board.querySelectorAll("piece.white.pawn");
 
-    // Set initial turn state if this is first detection
-    if (!lastTurnPlayerColor) {
-      lastTurnPlayerColor = "white"; // Chess always starts with white
-      isPlayerTurn = playerColor === "white";
-    }
-    return;
-  }
+    if (whitePawns.length > 0) {
+      // Check the transform of the first white pawn
+      const pawn = whitePawns[0] as HTMLElement;
+      const transform = pawn.style.transform;
+      const yMatch = transform.match(/translate\([^,]+,\s*(\d+)px\)/);
 
-  // In a new game, white always starts
-  if (!playerColor) {
-    // check board if starting position
-    const board = document.querySelector("cg-board");
-    if (board) {
-      const pieces = board.querySelectorAll("piece");
-      // If we have 32 pieces, it's starting position
-      if (pieces.length === 32) {
-        playerColor = "white"; // Default to white for new games
-        isPlayerTurn = true;
+      if (yMatch) {
+        const yPosition = parseInt(yMatch[1]);
+        // If y position is large (bottom of board), we're white
+        // If y position is small (top of board), we're black
+        playerColor = yPosition > 300 ? "white" : "black";
+        console.log(
+          `Detected player color from pawn position: ${playerColor}, y: ${yPosition}`
+        );
+        return playerColor;
       }
     }
   }
-
-  console.log(`Player color detection result: ${playerColor}`);
+  return null;
 };
 
-// When you detect a move
+// Add this function to retry color detection
+const ensurePlayerColor = () => {
+  if (!playerColor) {
+    const detectedColor = detectPlayerColor();
+    if (!detectedColor) {
+      // If we still don't have a color, retry after a short delay
+      console.log("Retrying player color detection...");
+      setTimeout(ensurePlayerColor, 500);
+    } else {
+      playerColor = detectedColor;
+      console.log("Successfully detected player color:", playerColor);
+    }
+  }
+};
+
+// Update the updateMoveHistory function to be more explicit
 const updateMoveHistory = (fen: string) => {
+  if (!fen) return;
+
+  console.log("Previous move history:", moveHistory);
   moveHistory.push(fen);
-  if (moveHistory.length > 50) moveHistory.shift();
+  if (moveHistory.length > 50) moveHistory.shift(); // Keep last 50 moves
+  console.log("Updated move history:", moveHistory);
 };
 
 // Start initialization when document is ready
