@@ -14,8 +14,10 @@ let moveHistory: string[] = [];
 let previousMoveElementsCount: number = 0;
 let turnCount: number = 0;
 // eslint-disable-next-line prefer-const
-let lastTurnPlayerColor: "white" | "black" = "white";
 let playerColor: "white" | "black" | null = null;
+let lastCompleteFen: string | null = null;
+let consecutiveMatchCount: number = 0;
+const REQUIRED_MATCHES = 2; // Number of consecutive identical FEN readings required
 
 // Initialize when content script loads
 const initialize = () => {
@@ -220,30 +222,10 @@ const startBoardObserver = () => {
     if (now - lastPieceChangeTime < MIN_MOVE_INTERVAL) return;
     lastPieceChangeTime = now;
 
+    // First wait a bit for initial animations to settle
     setTimeout(() => {
-      const newFen = extractFen();
-      if (!newFen || newFen === currentFen) return;
-
-      currentFen = newFen;
-      const isWhiteTurn = newFen.includes(" w ");
-      turnCount++;
-
-      // Add debug logging
-      console.log("Updating move history with FEN:", newFen);
-      updateMoveHistory(newFen);
-      console.log("Current move history length:", moveHistory.length);
-
-      const isPlayerToMove = playerColor === (isWhiteTurn ? "white" : "black");
-
-      console.log(
-        `Turn ${turnCount}: ${isWhiteTurn ? "White" : "Black"} to move. ${
-          isPlayerToMove ? "Your turn!" : "Opponent's turn."
-        }`
-      );
-
-      if (isPlayerToMove || turnCount <= 2) {
-        analyzeCurrentPosition(newFen);
-      }
+      // Then use a polling approach to ensure the board is completely stable
+      pollBoardUntilStable();
     }, 300);
   };
 
@@ -262,139 +244,370 @@ const stopBoardObserver = () => {
   }
 };
 
+// New polling function to wait until the board is stable
+const pollBoardUntilStable = () => {
+  // Reset consecutive match counter when starting a new poll cycle
+  consecutiveMatchCount = 0;
+
+  const pollInterval = 100; // Check every 100ms
+  const maxPolls = 10; // Maximum number of polls (1 second total)
+  let pollCount = 0;
+
+  const pollFn = () => {
+    pollCount++;
+    const currentFenSnapshot = extractFen();
+
+    // Debug logging
+    console.log(
+      `Poll ${pollCount}: extracted FEN: ${currentFenSnapshot?.substring(
+        0,
+        20
+      )}...`
+    );
+
+    if (!currentFenSnapshot) {
+      if (pollCount < maxPolls) {
+        setTimeout(pollFn, pollInterval);
+      } else {
+        console.error("Failed to extract valid FEN after maximum polls");
+      }
+      return;
+    }
+
+    if (currentFenSnapshot === lastCompleteFen) {
+      consecutiveMatchCount++;
+      console.log(
+        `FEN matched previous reading (${consecutiveMatchCount}/${REQUIRED_MATCHES})`
+      );
+
+      if (consecutiveMatchCount >= REQUIRED_MATCHES) {
+        // We have a stable board! Process it
+        processFinalFen(currentFenSnapshot);
+        return;
+      }
+    } else {
+      // Different FEN - reset counter and save new value
+      console.log("FEN changed, resetting stability counter");
+      consecutiveMatchCount = 1;
+      lastCompleteFen = currentFenSnapshot;
+    }
+
+    // Continue polling if we haven't reached stability and haven't hit max polls
+    if (pollCount < maxPolls) {
+      setTimeout(pollFn, pollInterval);
+    } else {
+      // We've hit max polls, use the last FEN we got
+      console.warn("Reached maximum polls without stability, using last FEN");
+      if (lastCompleteFen) {
+        processFinalFen(lastCompleteFen);
+      }
+    }
+  };
+
+  // Start polling
+  pollFn();
+};
+
+// Process the final, stable FEN
+const processFinalFen = (newFen: string) => {
+  if (!newFen || newFen === currentFen) return;
+
+  // Validate the FEN thoroughly
+  if (!validateFen(newFen)) {
+    console.error("Invalid FEN detected:", newFen);
+    return;
+  }
+
+  currentFen = newFen;
+  const isWhiteTurn = newFen.includes(" w ");
+  turnCount++;
+
+  // Add debug logging
+  console.log("Processing stable FEN:", newFen);
+  updateMoveHistory(newFen);
+  console.log("Current move history length:", moveHistory.length);
+
+  const isPlayerToMove = playerColor === (isWhiteTurn ? "white" : "black");
+
+  console.log(
+    `Turn ${turnCount}: ${isWhiteTurn ? "White" : "Black"} to move. ${
+      isPlayerToMove ? "Your turn!" : "Opponent's turn."
+    }`
+  );
+
+  if (isPlayerToMove || turnCount <= 2) {
+    analyzeCurrentPosition(newFen);
+  }
+};
+
+const validateFen = (fen: string): boolean => {
+  if (!fen) return false;
+
+  // Basic validation: Check if we have a valid FEN structure
+  const fenParts = fen.split(" ");
+  if (fenParts.length !== 6) {
+    console.error("Invalid FEN format: wrong number of sections");
+    return false;
+  }
+
+  // Count pieces in the FEN
+  const boardPart = fenParts[0];
+  let pieceCount = 0;
+  let kingCount = 0;
+
+  for (const char of boardPart) {
+    if (/[pnbrqkPNBRQK]/.test(char)) {
+      pieceCount++;
+
+      // Check for kings
+      if (char === "k") kingCount++;
+      if (char === "K") kingCount++;
+    }
+  }
+
+  // Both sides must have exactly one king
+  if (kingCount !== 2) {
+    console.error(`Invalid FEN: incorrect number of kings (${kingCount})`);
+    return false;
+  }
+
+  // In a standard chess game, there should be between 2 (just kings) and 32 pieces
+  if (pieceCount < 2 || pieceCount > 32) {
+    console.error(`Suspicious piece count in FEN: ${pieceCount} pieces`);
+    return false;
+  }
+
+  // Check each rank for correct length
+  const ranks = boardPart.split("/");
+  if (ranks.length !== 8) {
+    console.error(`Invalid FEN: incorrect number of ranks (${ranks.length})`);
+    return false;
+  }
+
+  // Validate each rank
+  for (const rank of ranks) {
+    let squares = 0;
+    for (const char of rank) {
+      if (/[1-8]/.test(char)) {
+        squares += parseInt(char);
+      } else if (/[pnbrqkPNBRQK]/.test(char)) {
+        squares += 1;
+      } else {
+        console.error(`Invalid character in FEN: ${char}`);
+        return false;
+      }
+    }
+
+    if (squares !== 8) {
+      console.error(`Invalid FEN: rank has ${squares} squares instead of 8`);
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const extractFen = () => {
-  const board: HTMLElement | null = document.querySelector("cg-board");
-  if (!board) return null;
+  const board = document.querySelector("cg-board");
+  if (!board) {
+    console.error("Board element not found");
+    return null;
+  }
 
-  // Get board dimensions dynamically
-  const boardRect = board.getBoundingClientRect();
-  const squareSize = boardRect.width / 8;
-
-  // Initialize empty 8x8 board
-  const boardArray: string[][] = Array(8)
-    .fill("")
+  // Initialize an 8x8 array to represent the board (empty)
+  const boardArray = Array(8)
+    .fill(null)
     .map(() => Array(8).fill(""));
 
   // Get all pieces
   const pieces = board.querySelectorAll("piece");
+  console.log(`Found ${pieces.length} pieces on the board`);
 
-  // Process each piece
-  pieces.forEach((piece) => {
-    const transform = (piece as HTMLElement).style.transform;
-    const matches = transform.match(/translate\((\d+)px(?:,\s*(\d+)px)?\)/);
+  // If we have too few pieces, board might not be fully rendered
+  if (pieces.length < 20) {
+    // Most openings have at least 20 pieces
+    console.warn(
+      "Suspiciously few pieces found, board might not be fully rendered"
+    );
+    // Return null to indicate we should try again later
+    return null;
+  }
 
-    if (matches) {
-      // Extract x, y coordinates
-      const x = parseInt(matches[1]) / squareSize;
-      const y = parseInt(String(matches[2] || 0)) / squareSize;
+  try {
+    // Square size calculation (more robust)
+    let squareSize = 0;
+    const boardRect = board.getBoundingClientRect();
+    squareSize = boardRect.width / 8; // Chess board is 8x8
 
-      // Get piece type and color
-      const classes = piece.classList;
-      let pieceChar = "";
-
-      if (classes.contains("pawn")) pieceChar = "p";
-      else if (classes.contains("knight")) pieceChar = "n";
-      else if (classes.contains("bishop")) pieceChar = "b";
-      else if (classes.contains("rook")) pieceChar = "r";
-      else if (classes.contains("queen")) pieceChar = "q";
-      else if (classes.contains("king")) pieceChar = "k";
-
-      // Uppercase for white pieces
-      if (classes.contains("white")) pieceChar = pieceChar.toUpperCase();
-
-      // Place on board (y axis is flipped in chess notation)
-      if (x >= 0 && x < 8 && y >= 0 && y < 8) {
-        boardArray[Math.floor(y)][Math.floor(x)] = pieceChar;
-      }
+    if (squareSize <= 0) {
+      console.error("Invalid square size calculated");
+      return null;
     }
-  });
 
-  // Convert board array to FEN
-  let fen = "";
-  for (let i = 0; i < 8; i++) {
-    let emptyCount = 0;
-    for (let j = 0; j < 8; j++) {
-      if (boardArray[i][j] === "") {
-        emptyCount++;
-      } else {
-        if (emptyCount > 0) {
-          fen += emptyCount;
-          emptyCount = 0;
+    console.log(`Calculated square size: ${squareSize}px`);
+
+    // Process each piece
+    pieces.forEach((piece) => {
+      // Extract piece type and color
+      const className = piece.className;
+      const isWhite = className.includes("white");
+
+      // Extract piece type with proper typing
+      type PieceType = "pawn" | "knight" | "bishop" | "rook" | "queen" | "king";
+      let pieceType: PieceType | null = null;
+
+      // Determine piece type from class name
+      if (className.includes("pawn")) pieceType = "pawn";
+      else if (className.includes("knight")) pieceType = "knight";
+      else if (className.includes("bishop")) pieceType = "bishop";
+      else if (className.includes("rook")) pieceType = "rook";
+      else if (className.includes("queen")) pieceType = "queen";
+      else if (className.includes("king")) pieceType = "king";
+
+      if (!pieceType) {
+        console.warn(`Could not determine piece type from class: ${className}`);
+        return; // Skip this piece
+      }
+
+      // Map piece type to FEN character
+      const pieceMap = {
+        pawn: "p",
+        knight: "n",
+        bishop: "b",
+        rook: "r",
+        queen: "q",
+        king: "k",
+      };
+
+      const pieceChar = pieceMap[pieceType];
+
+      // Convert to FEN notation (uppercase for white, lowercase for black)
+      const fenChar = isWhite ? pieceChar.toUpperCase() : pieceChar;
+
+      // Extract position from transform
+      const transform = (piece as HTMLElement).style.transform;
+      const match = transform.match(/translate\(([^,]+)px, ?([^)]+)px\)/);
+
+      if (!match) {
+        console.warn(`Could not extract position from transform: ${transform}`);
+        return; // Skip this piece
+      }
+
+      const xPixel = parseFloat(match[1]);
+      const yPixel = parseFloat(match[2]);
+
+      // Calculate chess coordinates
+      const file = Math.floor(xPixel / squareSize);
+      const rank = Math.floor(yPixel / squareSize);
+
+      // Validate coordinates are within board boundaries
+      if (file < 0 || file > 7 || rank < 0 || rank > 7) {
+        console.warn(`Piece coordinates out of bounds: (${file}, ${rank})`);
+        return; // Skip this piece
+      }
+
+      const rankIndex = rank;
+      const fileIndex = file;
+
+      // For debugging
+      console.log(
+        `Piece ${fenChar} at pixels (${xPixel}, ${yPixel}) maps to chess (${String.fromCharCode(
+          97 + file
+        )}${8 - rank}) and array [${rankIndex}][${fileIndex}]`
+      );
+
+      // Place the piece on the board
+      boardArray[rankIndex][fileIndex] = fenChar;
+    });
+
+    // Debug: Print the board array
+    console.log("Internal board representation:");
+    for (let i = 0; i < 8; i++) {
+      console.log(boardArray[i].join(" "));
+    }
+
+    // Convert the board array to FEN notation
+    let fen = "";
+    for (let rank = 0; rank < 8; rank++) {
+      let emptyCount = 0;
+      for (let file = 0; file < 8; file++) {
+        if (boardArray[rank][file] === "") {
+          emptyCount++;
+        } else {
+          if (emptyCount > 0) {
+            fen += emptyCount;
+            emptyCount = 0;
+          }
+          fen += boardArray[rank][file];
         }
-        fen += boardArray[i][j];
+      }
+      if (emptyCount > 0) {
+        fen += emptyCount;
+      }
+      if (rank < 7) {
+        fen += "/";
       }
     }
-    if (emptyCount > 0) {
-      fen += emptyCount;
-    }
-    if (i < 7) fen += "/";
-  }
 
-  let turn = "w";
-  const moveElements = document.querySelectorAll("kwdb");
-  if (moveElements.length === 0) {
-    // Initial position, white to move
-    turn = "w";
-    lastTurnPlayerColor = "white";
-  } else {
-    // After moves have been made
-    if (lastTurnPlayerColor === "white") {
-      turn = "b";
-      lastTurnPlayerColor = "black";
-    } else if (lastTurnPlayerColor === "black") {
+    // Determine turn, castling rights, etc. (same as before)
+    let turn = "w";
+    const moveElements = document.querySelectorAll("kwdb");
+    if (moveElements.length === 0) {
+      // Initial position, white to move
       turn = "w";
-      lastTurnPlayerColor = "white";
-    }
-  }
-
-  let castlingRights = "";
-
-  // White kingside castling
-  if (boardArray[7][4] === "K" && boardArray[7][7] === "R") {
-    castlingRights += "K";
-  }
-  // White queenside castling
-  if (boardArray[7][4] === "K" && boardArray[7][0] === "R") {
-    castlingRights += "Q";
-  }
-  // Black kingside castling
-  if (boardArray[0][4] === "k" && boardArray[0][7] === "r") {
-    castlingRights += "k";
-  }
-  // Black queenside castling
-  if (boardArray[0][4] === "k" && boardArray[0][0] === "r") {
-    castlingRights += "q";
-  }
-
-  // If no castling rights, use "-"
-  if (castlingRights === "") {
-    castlingRights = "-";
-  }
-
-  // Count empty squares to estimate how many pieces have been captured
-  let emptySquares = 0;
-  for (let i = 0; i < 8; i++) {
-    for (let j = 0; j < 8; j++) {
-      if (boardArray[i][j] === "") {
-        emptySquares++;
+    } else {
+      // After moves have been made
+      if (moveElements.length % 2 === 0) {
+        turn = "w"; // White to move after even number of moves
+      } else {
+        turn = "b"; // Black to move after odd number of moves
       }
     }
+
+    // Determine castling rights
+    let castlingRights = "";
+
+    // Check for kings and rooks in their starting positions
+    // White kingside castling
+    if (boardArray[7][4] === "K" && boardArray[7][7] === "R") {
+      castlingRights += "K";
+    }
+    // White queenside castling
+    if (boardArray[7][4] === "K" && boardArray[7][0] === "R") {
+      castlingRights += "Q";
+    }
+    // Black kingside castling
+    if (boardArray[0][4] === "k" && boardArray[0][7] === "r") {
+      castlingRights += "k";
+    }
+    // Black queenside castling
+    if (boardArray[0][4] === "k" && boardArray[0][0] === "r") {
+      castlingRights += "q";
+    }
+
+    // If no castling rights, use "-"
+    if (castlingRights === "") {
+      castlingRights = "-";
+    }
+
+    // En passant target square (simplified to "-" for now)
+    const enPassant = "-";
+
+    // Halfmove clock (for 50-move rule)
+    const halfmoveClock = "0";
+
+    // Fullmove number
+    const fullmoveNumber = "1";
+
+    // Complete FEN string
+    fen += ` ${turn} ${castlingRights} ${enPassant} ${halfmoveClock} ${fullmoveNumber}`;
+
+    console.log("Reconstructed FEN:", fen);
+    return fen;
+  } catch (error) {
+    console.error("Error extracting FEN:", error);
+    return null;
   }
-
-  // Roughly estimate the move number based on empty squares
-  // Starting position has 32 empty squares (64 - 32 pieces)
-  const emptySquaresInStart = 32;
-  const capturedPieces = emptySquares - emptySquaresInStart;
-  const estimatedMoveNumber = Math.max(1, Math.floor(capturedPieces / 2) + 1);
-
-  // we'll use "-" for now
-  const enPassant = "-";
-
-  // Complete FEN with improved components
-  fen += ` ${turn} ${castlingRights} ${enPassant} 0 ${estimatedMoveNumber}`;
-
-  console.log("Extracted FEN:", fen);
-  return fen;
 };
 
 const analyzeCurrentPosition = async (fen: string) => {
@@ -498,6 +711,7 @@ const analyzeCurrentPosition = async (fen: string) => {
       type: "REQUEST_ANALYSIS",
       fen: fen,
       playerToMove: playerToMove,
+      playerColor: playerColor,
       moveHistory: moveHistory,
     },
     (response) => {
@@ -522,6 +736,7 @@ const analyzeCurrentPosition = async (fen: string) => {
           bestMove: "Analysis unavailable",
           moveReasoning: "Could not analyze the position. Try again later.",
           depth: 0,
+          alternativeMoves: [],
         });
       }
 
@@ -545,6 +760,10 @@ const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
   window.postMessage(
     {
       type: "CHESS_ANALYSIS_RESULT",
+      analysis: analysis,
+      evaluation: analysis.evaluation,
+      depth: analysis.depth,
+      alternativeMoves: analysis.alternativeMoves,
       bestMove: analysis.bestMove,
       moveReasoning: analysis.moveReasoning,
     },

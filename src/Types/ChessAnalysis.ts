@@ -1,8 +1,13 @@
 interface ChessAnalysis {
     evaluation: number;
     bestMove: string;
-    depth: number;
     moveReasoning: string;
-}
+    depth: number;
+    alternativeMoves?: Array<{
+      move: string;
+      reasoning: string;
+      evaluation?: number;
+    }>;
+  }
 
 export default ChessAnalysis;
