@@ -76,7 +76,6 @@ chrome.runtime.onMessage.addListener(
           });
         });
 
-        // In case the tabs query doesn't return in time, still send a response
         // This is a fallback and may cause duplicate responses, which the caller should handle
         setTimeout(() => {
           sendResponse({ success: true, isActive: isActive });
@@ -155,16 +154,11 @@ const analyzePosition = async (
   moveHistory: (string | ChessMove)[] = []
 ): Promise<ChessAnalysis> => {
   try {
-    // Create a more structured context from the game history
     let historyContext = "";
 
     if (moveHistory.length > 0) {
-      // Use the full move history instead of just recent moves
-      // This ensures the AI has complete context of the game
       historyContext = createEnhancedContext(fen, moveHistory);
     } else {
-      // If we don't have structured move history, create a basic context
-      // Try to extract game phase information from the FEN
       const pieces = fen.split(" ")[0];
       const pieceCount = pieces.replace(/[^A-Za-z]/g, "").length;
 
@@ -177,7 +171,6 @@ const analyzePosition = async (
 
       historyContext = `Estimated game phase: ${gamePhase}`;
 
-      // Add pawn structure analysis
       const ranks = fen.split(" ")[0].split("/");
       const pawnStructure = analyzePawnStructure(ranks);
       historyContext += `\n${pawnStructure}`;
@@ -185,7 +178,6 @@ const analyzePosition = async (
 
     console.log("History context:", historyContext);
 
-    // Validate FEN string
     const isValidFen = validateFen(fen);
     if (!isValidFen.valid) {
       console.error("Invalid FEN string:", isValidFen.error);
@@ -197,7 +189,6 @@ const analyzePosition = async (
       };
     }
 
-    // Build user message with current game state
     const userMessage = `
     Analyze this specific chess position: ${fen}
     I am playing as ${playerColor}
@@ -251,10 +242,8 @@ const analyzePosition = async (
       const content = response.data.choices[0].message.content.trim();
       console.log("Raw AI response:", content);
 
-      // More robust JSON extraction - handles both raw JSON and JSON in code blocks
       let sanitizedContent = content;
 
-      // Remove markdown code blocks if present
       if (content.includes("```")) {
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (jsonMatch && jsonMatch[1]) {
@@ -262,7 +251,6 @@ const analyzePosition = async (
         }
       }
 
-      // Try to extract JSON if the response isn't already valid JSON
       if (!sanitizedContent.startsWith("{")) {
         const jsonMatch = sanitizedContent.match(/(\{[\s\S]*\})/);
         if (jsonMatch && jsonMatch[1]) {
@@ -294,7 +282,6 @@ const analyzePosition = async (
         };
       }
 
-      // Validate the move is physically possible
       const isValidMove = validateMove(fen, responseData.bestMove);
       if (!isValidMove) {
         console.warn(
@@ -328,7 +315,6 @@ const analyzePosition = async (
           })
           .filter(Boolean); // Remove null entries
       } else {
-        // If no alternative moves were provided, create an empty array
         responseData.alternativeMoves = [];
       }
 

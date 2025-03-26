@@ -1,4 +1,3 @@
-// Add type declarations for global properties
 declare global {
   interface Window {
     __CHESS_ASSISTANT_INITIALIZED: boolean;
@@ -10,7 +9,6 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 
-// Add a global flag to prevent double initialization
 window.__CHESS_ASSISTANT_INITIALIZED = false;
 
 // Listen for the container ready message from the content script
@@ -39,7 +37,6 @@ window.addEventListener('message', (event) => {
           );
           console.log('Chess Assistant React app initialized successfully');
 
-          // add a global reference to the root for potential debugging
           window.__CHESS_ASSISTANT_ROOT = root;
         } catch (error) {
           console.error('Failed to initialize Chess Assistant React app:', error);

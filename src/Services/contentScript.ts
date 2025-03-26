@@ -11,11 +11,9 @@ let sidebar: HTMLElement | null = null;
 let boardObserver: MutationObserver | null = null;
 let currentFen: string | null = null;
 let isActive: boolean = false;
-// eslint-disable-next-line prefer-const
-let moveHistory: string[] = [];
+const moveHistory: string[] = [];
 let previousMoveElementsCount: number = 0;
 let turnCount: number = 0;
-// eslint-disable-next-line prefer-const
 let playerColor: "white" | "black" | null = null;
 let lastCompleteFen: string | null = null;
 let consecutiveMatchCount: number = 0;
@@ -171,17 +169,14 @@ const initialize = () => {
 
   // Global click handler to prevent sidebar from disappearing
   const documentClickHandler = (e: MouseEvent) => {
-    // If the sidebar exists and is active, prevent default action
     if (sidebar && isActive) {
       // Only prevent if click was outside the sidebar
       if (sidebar && !sidebar.contains(e.target as Node)) {
-        // Don't stop propagation completely, just prevent sidebar removal
         e.stopPropagation();
       }
     }
   };
 
-  // Add click handler to document - using capture phase
   document.addEventListener("click", documentClickHandler, true);
 
   // Listen for messages from the background script
@@ -222,7 +217,6 @@ const initialize = () => {
 };
 
 const injectSidebar = () => {
-  // Check if sidebar already exists
   if (sidebar) {
     console.log("Sidebar already exists, not injecting again");
     return;
@@ -243,7 +237,6 @@ const injectSidebar = () => {
   const reactRoot = document.createElement("div");
   reactRoot.id = "react-root";
 
-  // Add some base styles
   const styleElement = document.createElement("style");
   styleElement.textContent = SIDEBAR_STYLES;
   shadow.appendChild(styleElement);
@@ -263,7 +256,6 @@ const injectSidebar = () => {
     e.stopPropagation();
   });
 
-  // Append to the document body
   document.body.appendChild(container);
 
   // Store reference to the sidebar
@@ -283,7 +275,6 @@ const injectSidebar = () => {
   script.onload = () => {
     console.log("Sidebar script loaded successfully");
     // Signal that the container is ready for React rendering
-    // Add a small delay to ensure everything is properly loaded
     setTimeout(() => {
       window.postMessage(
         {
@@ -306,7 +297,6 @@ const removeSidebar = () => {
 };
 
 const startBoardObserver = () => {
-  // Replace the single detection call with ensurePlayerColor
   ensurePlayerColor();
 
   const fen = extractFen();
@@ -318,7 +308,6 @@ const startBoardObserver = () => {
   // Track last piece change time to prevent double-counting
   let lastPieceChangeTime = 0;
   const MIN_MOVE_INTERVAL = 300; // Minimum time between move detections (ms)
-  // Set up board observer for DOM changes
   boardObserver = new MutationObserver(() => {
     // Get all kwdb elements (move notation elements)
     const moveElements = document.querySelectorAll("kwdb");
@@ -329,7 +318,6 @@ const startBoardObserver = () => {
 
     if (currentMoveElementsCount === 0) {
       // Initial state of the board - need to check for piece movements
-      // We'll use the FEN directly to check for changes
       const newFen = extractFen();
       if (newFen && newFen !== currentFen && currentFen !== null) {
         boardChanged = true;
@@ -356,9 +344,7 @@ const startBoardObserver = () => {
     if (now - lastPieceChangeTime < MIN_MOVE_INTERVAL) return;
     lastPieceChangeTime = now;
 
-    // First wait a bit for initial animations to settle
     setTimeout(() => {
-      // Then use a polling approach to ensure the board is completely stable
       pollBoardUntilStable();
     }, 300);
   };
@@ -377,10 +363,7 @@ const stopBoardObserver = () => {
     boardObserver = null;
   }
 };
-
-// New polling function to wait until the board is stable
 const pollBoardUntilStable = () => {
-  // Reset consecutive match counter when starting a new poll cycle
   consecutiveMatchCount = 0;
 
   const pollInterval = 100; // Check every 100ms
@@ -415,7 +398,6 @@ const pollBoardUntilStable = () => {
       );
 
       if (consecutiveMatchCount >= REQUIRED_MATCHES) {
-        // We have a stable board! Process it
         processFinalFen(currentFenSnapshot);
         return;
       }
@@ -426,7 +408,6 @@ const pollBoardUntilStable = () => {
       lastCompleteFen = currentFenSnapshot;
     }
 
-    // Continue polling if we haven't reached stability and haven't hit max polls
     if (pollCount < maxPolls) {
       setTimeout(pollFn, pollInterval);
     } else {
@@ -438,11 +419,9 @@ const pollBoardUntilStable = () => {
     }
   };
 
-  // Start polling
   pollFn();
 };
 
-// Process the final, stable FEN
 const processFinalFen = (newFen: string) => {
   if (!newFen || newFen === currentFen) return;
 
@@ -477,7 +456,6 @@ const processFinalFen = (newFen: string) => {
 const validateFen = (fen: string): boolean => {
   if (!fen) return false;
 
-  // Basic validation: Check if we have a valid FEN structure
   const fenParts = fen.split(" ");
   if (fenParts.length !== 6) {
     console.error("Invalid FEN format: wrong number of sections");
@@ -568,7 +546,6 @@ const extractFen = () => {
   }
 
   try {
-    // Square size calculation (more robust)
     let squareSize = 0;
     const boardRect = board.getBoundingClientRect();
     squareSize = boardRect.width / 8; // Chess board is 8x8
@@ -580,7 +557,6 @@ const extractFen = () => {
 
     console.log(`Calculated square size: ${squareSize}px`);
 
-    // Process each piece
     pieces.forEach((piece) => {
       // Extract piece type and color
       const className = piece.className;
@@ -600,7 +576,7 @@ const extractFen = () => {
 
       if (!pieceType) {
         console.warn(`Could not determine piece type from class: ${className}`);
-        return; // Skip this piece
+        return;
       }
 
       // Map piece type to FEN character
@@ -618,13 +594,12 @@ const extractFen = () => {
       // Convert to FEN notation (uppercase for white, lowercase for black)
       const fenChar = isWhite ? pieceChar.toUpperCase() : pieceChar;
 
-      // Extract position from transform
       const transform = (piece as HTMLElement).style.transform;
       const match = transform.match(/translate\(([^,]+)px, ?([^)]+)px\)/);
 
       if (!match) {
         console.warn(`Could not extract position from transform: ${transform}`);
-        return; // Skip this piece
+        return; 
       }
 
       const xPixel = parseFloat(match[1]);
@@ -759,7 +734,6 @@ const analyzeCurrentPosition = async (fen: string) => {
     });
   }
 
-  // Now we're sure we have playerColor
   console.log(
     `Analyzing position for ${playerColor} player, it's ${
       fen.includes(" w ") ? "white" : "black"
@@ -777,10 +751,7 @@ const analyzeCurrentPosition = async (fen: string) => {
 
   const now = Date.now();
 
-  // If we're already analyzing or it's too soon since last analysis
   if (analysisInProgress) {
-    // For computer games, we need to prioritize the latest position
-    // Cancel any previous analysis request if possible
     analysisQueue = fen;
     console.log(
       "Analysis already in progress, will analyze latest position when done"
@@ -788,18 +759,14 @@ const analyzeCurrentPosition = async (fen: string) => {
     return;
   }
 
-  // If it's too soon since the last analysis, but this is a player's turn after computer moved
   const computerJustMoved =
     (playerColor === "white" && fen.includes(" w ")) ||
     (playerColor === "black" && fen.includes(" b "));
 
   if (now - lastAnalysisTime < MIN_ANALYSIS_INTERVAL) {
     if (computerJustMoved) {
-      // This is an important position to analyze - it's your turn after computer moved
       console.log("Computer just moved, prioritizing analysis");
-      // Let it proceed despite the interval
     } else {
-      // Just queue the request and set a timer
       analysisQueue = fen;
       console.log(
         `Too soon for analysis, waiting ${
@@ -810,16 +777,13 @@ const analyzeCurrentPosition = async (fen: string) => {
     }
   }
 
-  // Mark that we're analyzing this position
   lastAnalyzedFenKey = fenBoardAndTurn;
 
-  // We can perform analysis now
   analysisInProgress = true;
   lastAnalysisTime = now;
 
-  // Only send analysis request if we know the player's color
   if (!playerColor) {
-    detectPlayerColor(); // Make sure we have the color
+    detectPlayerColor();
   }
 
   console.log(
@@ -849,7 +813,6 @@ const analyzeCurrentPosition = async (fen: string) => {
       moveHistory: moveHistory,
     },
     (response) => {
-      // Mark that we're done with the analysis
       analysisInProgress = false;
 
       if (chrome.runtime.lastError) {
@@ -864,7 +827,6 @@ const analyzeCurrentPosition = async (fen: string) => {
           "Analysis request failed",
           response?.error || "Unknown error"
         );
-        // Show an error in the sidebar
         updateSidebarWithAnalysis({
           evaluation: 0,
           bestMove: "Analysis unavailable",
@@ -873,12 +835,10 @@ const analyzeCurrentPosition = async (fen: string) => {
         });
       }
 
-      // Check if there's a queued analysis request
       if (analysisQueue) {
         const queuedFen = analysisQueue;
         analysisQueue = null;
 
-        // Wait a bit before processing the queued request
         setTimeout(() => {
           analyzeCurrentPosition(queuedFen);
         }, 500);
@@ -888,7 +848,6 @@ const analyzeCurrentPosition = async (fen: string) => {
 };
 
 const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
-  // Send the analysis to React application in the sidebar
   console.log("Updating sidebar with analysis", analysis);
   window.postMessage(
     {
@@ -906,11 +865,9 @@ const updateSidebarWithAnalysis = (analysis: ChessAnalysis) => {
 const detectPlayerColor = () => {
   const board = document.querySelector("cg-board");
   if (board) {
-    // Find a white pawn (should be on the 7th rank if we're white, 2nd rank if we're black)
     const whitePawns = board.querySelectorAll("piece.white.pawn");
 
     if (whitePawns.length > 0) {
-      // Check the transform of the first white pawn
       const pawn = whitePawns[0] as HTMLElement;
       const transform = pawn.style.transform;
       const yMatch = transform.match(/translate\([^,]+,\s*(\d+)px\)/);
@@ -930,12 +887,10 @@ const detectPlayerColor = () => {
   return null;
 };
 
-// Add this function to retry color detection
 const ensurePlayerColor = () => {
   if (!playerColor) {
     const detectedColor = detectPlayerColor();
     if (!detectedColor) {
-      // If we still don't have a color, retry after a short delay
       console.log("Retrying player color detection...");
       setTimeout(ensurePlayerColor, 500);
     } else {
@@ -945,7 +900,6 @@ const ensurePlayerColor = () => {
   }
 };
 
-// Update the updateMoveHistory function to be more explicit
 const updateMoveHistory = (fen: string) => {
   if (!fen) return;
 

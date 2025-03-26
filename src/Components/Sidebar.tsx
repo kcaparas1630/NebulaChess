@@ -72,7 +72,6 @@ const Sidebar = () => {
       if (event.data && event.data.type === "CHESS_ANALYSIS_RESULT") {
         console.log("Received analysis:", event.data);
         
-        // Get the data with safer type handling
         const bestMoveData = event.data.bestMove || "";
         const evalData = event.data.evaluation || 0;
 
