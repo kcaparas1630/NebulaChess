@@ -1,3 +1,5 @@
+// can't use import here since it's not a module. let's not complicate things.
+
 import ChessAnalysis from "../Types/ChessAnalysis";
 
 let lastAnalysisTime = 0;
@@ -163,7 +165,6 @@ const SIDEBAR_STYLES = `
     }
   `;
 
-
 // Initialize when content script loads
 const initialize = () => {
   console.log("Chess Assistant for Lichess is initialized");
@@ -242,13 +243,13 @@ const injectSidebar = () => {
   const reactRoot = document.createElement("div");
   reactRoot.id = "react-root";
 
-  // Append to shadow DOM
-  shadow.appendChild(reactRoot);
-
   // Add some base styles
   const styleElement = document.createElement("style");
   styleElement.textContent = SIDEBAR_STYLES;
   shadow.appendChild(styleElement);
+
+  // Append to shadow DOM
+  shadow.appendChild(reactRoot);
 
   // Position the sidebar on the right side of the page
   container.style.position = "fixed";
