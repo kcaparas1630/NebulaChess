@@ -224,82 +224,36 @@ const validateMove = (fen: string, moveNotation: string): boolean => {
     return true; // Default to allowing the move in case of validator error
   }
 };
-const CHESS_ANALYSIS_PROMPT = `You are an elite chess grandmaster focused on finding the optimal moves against famous chess players. Your task is to analyze chess positions with grandmaster-level precision and provide:
-1. The single best move in standard chess notation (e.g., "e4" or "Nf3")
-2. Concise reasoning explaining why this move is optimal
+const CHESS_ANALYSIS_PROMPT = `You are an elite chess analyzer focused on finding optimal moves in chess positions. When presented with a chess position (in FEN notation), analyze it with precision and provide:
 
-Your analysis must be formatted to match this interface:
+1. The single best move in standard algebraic notation
+2. Alternative moves that are nearly as good (if any exist)
+3. A brief position evaluation in centipawns
+
+Your response must be formatted as:
+
 {
-  "evaluation": number,  // Position evaluation in centipawns (positive favors you, negative favors opponent)
-  "bestMove": string,   // The single best move in the position in standard algebraic notation (e.g., "e4" or "Nf3")
-  "depth": number,      // Depth of calculation (5 minimum)
-  "moveReasoning": string // Brief explanation of why this is the best move
+  "evaluation": number,  // Position evaluation in centipawns (positive favors white)
+  "bestMove": string,    // The single best move in standard algebraic notation
+  "depth": number,       // Calculation depth (minimum 5)
+  "alternatives": [      // Alternative strong moves, if any
+    {
+      "move": string,    // Alternative move in standard algebraic notation
+      "evaluation": number  // Evaluation of this alternative
+    }
+  ]
 }
 
-MATERIAL VALUE PRIORITIES:
-- Queen: 9 points
-- Rook: 5 points
-- Bishop/Knight: 3 points
-- Pawn: 1 point
-- King: infinite (must be protected at all costs)
-
-When evaluating moves, prioritize:
-1. Protecting your high-value pieces when under threat
-2. Capturing opponent's pieces when safe to do so (especially higher-value pieces)
-3. Trading only when favorable (e.g., capturing a queen with a bishop)
-4. Avoiding unfavorable exchanges (don't trade your queen for a rook)
-
-BEFORE SUGGESTING ANY MOVE, VERIFY IT IS PHYSICALLY POSSIBLE BY CHECKING:
-- The piece you want to move actually exists on the board
-- There is a clear path from the piece's current position to the destination
-- For bishops: they can ONLY move diagonally and CANNOT jump over other pieces
-- For rooks: they can ONLY move horizontally or vertically and CANNOT jump over other pieces
-- For knights: they can ONLY move in an L-shape (2 squares then 1 perpendicular)
-- For pawns: they can only move forward one square (or two from starting position)
-- For all pieces: they can only capture pieces they can legally move to
-
-CRITICAL: In the position you're analyzing, look carefully at whether your suggested move is physically possible given the current piece positions. If a bishop is on c1 and there's a pawn on d2, the bishop CANNOT move to d3, e4, f5, etc.
-
-Move notation must be in standard algebraic notation:
-- Pawn moves: only the destination square (e.g., "e4", "d5")
-- Piece moves: piece letter (K=King, Q=Queen, R=Rook, B=Bishop, N=Knight) + destination square (e.g., "Nf3", "Qd1")
-- Captures: include "x" (e.g., "Bxf7", "exd5")
-- Castling: "O-O" for kingside, "O-O-O" for queenside
-- When disambiguating moves, specify file or rank as needed (e.g., "Rdf8", "N1c3")
-- Check: add "+" (e.g., "Qf7+")
-- Checkmate: add "#" (e.g., "Qf7#")
 
 When analyzing positions:
 - Calculate at least 5 moves deep
-- Identify tactical opportunities (captures, threats, pins, forks)
-- Prioritize moves that defend threatened valuable pieces
-- Seek advantageous captures (especially when gaining material)
-- Consider positional advantages after assessing material safety
-- Identify and avoid potential material losses
-- Consider Magnus Carlsen's known tendencies in similar positions
-- Focus on practical winning chances rather than theoretical evaluations
-- Double check that there are no conflicting same colors in the tile
+- Prioritize tactical opportunities and material safety
+- Consider positional factors after ensuring material is secure
+- Verify all moves are legal in the given position
 
-When provided with game history:
-- Identify the opponent's last move from the position changes
-- Consider how the opponent is playing (aggressive, defensive, positional)
-- Adapt your recommendations to counter the opponent's strategy
-- Reference specific moves in the history when relevant to your analysis
-- Identify pieces under immediate threat and prioritize their defense
+For opening positions, recommend strong opening options with their first moves.
 
-When the game is starting (initial position), provide the user with strong opening options such as:
-- Queen's Gambit
-- Ruy Lopez
-- English Opening
-- Sicilian Defense
-- King's Indian Defense
-- French Defense
-- Caro-Kann
-Include the first move of each opening and a brief strength/characteristic of that opening against a famous grandmaster style.
-
-You will receive positions in FEN notation, possibly with previous positions for context. Respond ONLY with the structured analysis that matches the interface - no introduction or additional commentary.
-
-Your response must be ONLY a valid JSON object with the exact structure shown, with no additional text, markdown formatting, or explanation before or after. The entire response must be parsable as JSON.`;
+Respond ONLY with the JSON object as specified above.`;
 
 // Helper function to validate FEN string
 const validateFen = (fen: string) => {
@@ -600,7 +554,6 @@ const analyzePosition = async (
       return {
         evaluation: 0,
         bestMove: "Invalid position",
-        moveReasoning: `Invalid position: ${isValidFen.error}. Please check the board.`,
         depth: 0,
         alternativeMoves: [],
       };
@@ -618,7 +571,6 @@ const analyzePosition = async (
     - evaluation: A numerical evaluation of the position (positive favors white, negative favors black)
     - bestMove: The best move in algebraic notation (e.g., "e4" or "Nf3")
     - depth: The depth of analysis
-    - moveReasoning: A detailed explanation of why the bestMove is recommended
     - alternativeMoves: An array of 1-2 alternative good moves, each with a "move" and "reasoning" property
     
     Format your response as clean, parseable JSON without markdown code blocks.
@@ -626,12 +578,12 @@ const analyzePosition = async (
 
     console.log("Sending analysis request with context:", userMessage);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20-second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30-second timeout
 
     const response = await axios.post(
       "https://api.studio.nebius.ai/v1/chat/completions",
       {
-        model: "deepseek-ai/DeepSeek-R1",
+        model: "deepseek-ai/DeepSeek-V3",
         max_tokens: 5000,
         temperature: 0.6,
         top_p: 0.9,
@@ -660,10 +612,10 @@ const analyzePosition = async (
     try {
       const content = response.data.choices[0].message.content.trim();
       console.log("Raw AI response:", content);
-      
+
       // More robust JSON extraction - handles both raw JSON and JSON in code blocks
       let sanitizedContent = content;
-      
+
       // Remove markdown code blocks if present
       if (content.includes("```")) {
         const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -673,7 +625,7 @@ const analyzePosition = async (
       }
 
       // Try to extract JSON if the response isn't already valid JSON
-      if (!sanitizedContent.startsWith('{')) {
+      if (!sanitizedContent.startsWith("{")) {
         const jsonMatch = sanitizedContent.match(/(\{[\s\S]*\})/);
         if (jsonMatch && jsonMatch[1]) {
           sanitizedContent = jsonMatch[1].trim();
@@ -685,18 +637,20 @@ const analyzePosition = async (
         responseData = JSON.parse(sanitizedContent);
         console.log("Parsed analysis response:", responseData);
       } catch (jsonError) {
-        console.error("JSON parsing error, trying fallback extraction:", jsonError);
+        console.error(
+          "JSON parsing error, trying fallback extraction:",
+          jsonError
+        );
         // Fallback: Use regex to extract key fields
         const extractField = (field: string) => {
-          const regex = new RegExp(`"${field}"\\s*:\\s*"?([^",}]*)"?`, 'i');
+          const regex = new RegExp(`"${field}"\\s*:\\s*"?([^",}]*)"?`, "i");
           const match = content.match(regex);
           return match ? match[1].trim() : null;
         };
-        
+
         responseData = {
           evaluation: parseFloat(extractField("evaluation") || "0"),
           bestMove: extractField("bestMove") || "Unknown",
-          moveReasoning: extractField("moveReasoning") || "No reasoning provided",
           alternativeMoves: extractField("alternativeMoves") || [],
           depth: parseInt(extractField("depth") || "0", 10),
         };
@@ -709,24 +663,29 @@ const analyzePosition = async (
           `AI suggested invalid move: ${responseData.bestMove} - replacing with fallback move`
         );
         responseData.bestMove = "Nc3";
-        responseData.moveReasoning =
-          "Developing a knight to a good central square, controlling important central squares and preparing for further development.";
       }
 
       // Validate alternative moves if present
-      if (responseData.alternativeMoves && Array.isArray(responseData.alternativeMoves)) {
+      if (
+        responseData.alternativeMoves &&
+        Array.isArray(responseData.alternativeMoves)
+      ) {
         responseData.alternativeMoves = responseData.alternativeMoves
-          .filter((move: AlternativeMove) => move && typeof move === 'object' && move.move)
+          .filter(
+            (move: AlternativeMove) =>
+              move && typeof move === "object" && move.move
+          )
           .map((move: AlternativeMove) => {
             // Validate each alternative move
             if (!validateMove(fen, move.move)) {
-              console.warn(`Invalid alternative move: ${move.move} - removing from list`);
+              console.warn(
+                `Invalid alternative move: ${move.move} - removing from list`
+              );
               return null;
             }
             return {
               move: move.move,
-              reasoning: move.reasoning || "No reasoning provided",
-              evaluation: move.evaluation || null
+              evaluation: move.evaluation || null,
             };
           })
           .filter(Boolean); // Remove null entries
@@ -739,9 +698,8 @@ const analyzePosition = async (
       const analysis: ChessAnalysis = {
         evaluation: responseData.evaluation || 0,
         bestMove: responseData.bestMove || "Unknown",
-        moveReasoning: responseData.moveReasoning || "No reasoning provided",
         depth: responseData.depth || 0,
-        alternativeMoves: responseData.alternativeMoves || []
+        alternativeMoves: responseData.alternativeMoves || [],
       };
 
       return analysis;
@@ -750,10 +708,8 @@ const analyzePosition = async (
       return {
         evaluation: 0,
         bestMove: "Unable to parse response",
-        moveReasoning:
-          "The analysis engine returned an invalid response. Please try again.",
         depth: 0,
-        alternativeMoves: []
+        alternativeMoves: [],
       };
     }
   } catch (error: unknown) {
