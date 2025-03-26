@@ -33,7 +33,6 @@ NebulaChess Assistant is a Chrome extension that enhances your chess experience 
 - **Background Script**: Manages extension state and communication
 - **Content Script**: Interfaces with the Lichess DOM
 - **Sidebar**: React-based UI component for displaying analysis
-- **Analysis Engine**: Connects to Nebius AI for chess position evaluation
 
 ### Key Utilities
 - `ExtractFen.ts`: Extracts the current board state in FEN notation
